@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +26,8 @@ type config struct {
 	workspaceDir string
 	lspCommand   string
 	lspArgs      []string
+	configFile   string
+	lspConfig    map[string]any
 }
 
 type mcpServer struct {
@@ -39,6 +43,7 @@ func parseConfig() (*config, error) {
 	cfg := &config{}
 	flag.StringVar(&cfg.workspaceDir, "workspace", "", "Path to workspace directory")
 	flag.StringVar(&cfg.lspCommand, "lsp", "", "LSP command to run (args should be passed after --)")
+	flag.StringVar(&cfg.configFile, "config", "", "Path to LSP configuration file (JSON)")
 	flag.Parse()
 
 	// Get remaining args after -- as LSP arguments
@@ -68,7 +73,49 @@ func parseConfig() (*config, error) {
 		return nil, fmt.Errorf("LSP command not found: %s", cfg.lspCommand)
 	}
 
+	// Parse config file if provided
+	if cfg.configFile != "" {
+		err := parseConfigFile(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse config file: %v", err)
+		}
+	}
+
 	return cfg, nil
+}
+
+func parseConfigFile(cfg *config) error {
+	data, err := os.ReadFile(cfg.configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %v", err)
+	}
+
+	var allConfigs map[string]any
+	if err := json.Unmarshal(data, &allConfigs); err != nil {
+		return fmt.Errorf("failed to parse JSON config: %v", err)
+	}
+
+	// Extract config for the specific LSP server
+	lspName := extractLSPName(cfg.lspCommand)
+	if lspConfig, exists := allConfigs[lspName]; exists {
+		if configMap, ok := lspConfig.(map[string]any); ok {
+			cfg.lspConfig = configMap
+		} else {
+			return fmt.Errorf("config for %s must be a JSON object", lspName)
+		}
+	}
+
+	return nil
+}
+
+func extractLSPName(command string) string {
+	// Extract just the binary name from the full path
+	baseName := filepath.Base(command)
+	// Remove file extension if present
+	if ext := filepath.Ext(baseName); ext != "" {
+		baseName = strings.TrimSuffix(baseName, ext)
+	}
+	return baseName
 }
 
 func newServer(config *config) (*mcpServer, error) {
@@ -92,7 +139,7 @@ func (s *mcpServer) initializeLSP() error {
 	s.lspClient = client
 	s.workspaceWatcher = watcher.NewWorkspaceWatcher(client)
 
-	initResult, err := client.InitializeLSPClient(s.ctx, s.config.workspaceDir)
+	initResult, err := client.InitializeLSPClient(s.ctx, s.config.workspaceDir, s.config.lspConfig)
 	if err != nil {
 		return fmt.Errorf("initialize failed: %v", err)
 	}

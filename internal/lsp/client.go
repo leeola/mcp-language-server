@@ -113,7 +113,27 @@ func (c *Client) RegisterServerRequestHandler(method string, handler ServerReque
 	c.serverRequestHandlers[method] = handler
 }
 
-func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
+func getInitializationOptions(customConfig map[string]any) map[string]any {
+	// If custom config is provided, use it
+	if customConfig != nil && len(customConfig) > 0 {
+		return customConfig
+	}
+
+	// Otherwise, use default configuration (primarily for gopls)
+	return map[string]any{
+		"codelenses": map[string]bool{
+			"generate":           true,
+			"regenerate_cgo":     true,
+			"test":               true,
+			"tidy":               true,
+			"upgrade_dependency": true,
+			"vendor":             true,
+			"vulncheck":          false,
+		},
+	}
+}
+
+func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string, customConfig map[string]any) (*protocol.InitializeResult, error) {
 	initParams := &protocol.InitializeParams{
 		WorkspaceFoldersInitializeParams: protocol.WorkspaceFoldersInitializeParams{
 			WorkspaceFolders: []protocol.WorkspaceFolder{
@@ -177,17 +197,7 @@ func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (
 				},
 				Window: protocol.WindowClientCapabilities{},
 			},
-			InitializationOptions: map[string]any{
-				"codelenses": map[string]bool{
-					"generate":           true,
-					"regenerate_cgo":     true,
-					"test":               true,
-					"tidy":               true,
-					"upgrade_dependency": true,
-					"vendor":             true,
-					"vulncheck":          false,
-				},
-			},
+			InitializationOptions: getInitializationOptions(customConfig),
 		},
 	}
 
